@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Stadio — Terrains de soccer à Montréal</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Teko:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
@@ -151,6 +153,15 @@
     border:2px solid var(--floodlight);animation:pulse 1.6s ease-out infinite;
   }
   @keyframes pulse{0%{transform:scale(.6);opacity:1;}100%{transform:scale(1.6);opacity:0;}}
+
+  /* ---------- Clusters (regroupement de pins à faible zoom, pour la perf) ---------- */
+  .stadio-cluster{
+    display:flex;align-items:center;justify-content:center;
+    width:38px;height:38px;border-radius:50%;
+    background:var(--accent-dark);color:var(--on-accent);
+    border:3px solid rgba(255,255,255,.75);box-shadow:0 2px 6px rgba(0,0,0,.30);
+    font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:13px;
+  }
 
   .leaflet-popup-content-wrapper{background:var(--panel);color:var(--ink);border-radius:var(--radius);}
   .leaflet-popup-tip{background:var(--panel);}
@@ -334,6 +345,7 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script>
 /* =====================================================================
@@ -542,7 +554,24 @@ let mapUserMoved = false;
 let isProgrammaticMove = false;
 map.on('movestart', ()=>{ if(!isProgrammaticMove) mapUserMoved = true; });
 
-let markers = {};
+// Regroupement des pins (cluster) : évite de faire gérer à Leaflet des
+// centaines de divIcon individuels au zoom/pan, ce qui causait le freeze.
+const markerCluster = L.markerClusterGroup({
+  maxClusterRadius: 50,
+  spiderfyOnMaxZoom: true,
+  showCoverageOnHover: false,
+  disableClusteringAtZoom: 16, // zoomé de près : on voit chaque pin individuellement
+  iconCreateFunction: function(cluster){
+    return L.divIcon({
+      html: `<div class="stadio-cluster">${cluster.getChildCount()}</div>`,
+      className: '',
+      iconSize: [38,38],
+    });
+  },
+});
+map.addLayer(markerCluster);
+
+let markers = {}; // id -> L.marker (toujours dans markerCluster, jamais ajouté directement à map)
 let activeSport = 'soccer';
 let selectedId = null;
 
@@ -901,15 +930,34 @@ function render(){
   document.getElementById('clock').textContent = new Date().toLocaleTimeString('fr-CA',{hour:'2-digit',minute:'2-digit'});
   renderScoreboard(list);
 
-  Object.values(markers).forEach(m=>map.removeLayer(m));
-  markers = {};
+  // Mise à jour incrémentale des marqueurs (au lieu de tout détruire/recréer
+  // à chaque render — coûteux à ~300 terrains et cause du freeze au zoom).
+  // On retire seulement les pins qui ne sont plus dans la liste filtrée,
+  // on ajoute seulement les nouveaux, et on met à jour l'icône seulement
+  // si le statut a changé.
+  const newIds = new Set(list.map(t=>t.id));
+  Object.keys(markers).forEach(id=>{
+    if(!newIds.has(id)){
+      markerCluster.removeLayer(markers[id]);
+      delete markers[id];
+    }
+  });
   list.forEach(t=>{
     const eff = effectiveStatus(t);
-    const fresh = false;
-    const m = L.marker([t.lat,t.lng], {icon: pinIcon(eff.status, fresh)}).addTo(map);
-    m.bindPopup('', {closeButton:true, offset:[0,-4]});
-    m.on('click', ()=> openMiniPopup(t));
-    markers[t.id] = m;
+    const existing = markers[t.id];
+    if(existing){
+      if(existing._statusKey !== eff.status){
+        existing.setIcon(pinIcon(eff.status, false));
+        existing._statusKey = eff.status;
+      }
+    }else{
+      const m = L.marker([t.lat,t.lng], {icon: pinIcon(eff.status, false)});
+      m.bindPopup('', {closeButton:true, offset:[0,-4]});
+      m.on('click', ()=> openMiniPopup(t));
+      m._statusKey = eff.status;
+      markers[t.id] = m;
+      markerCluster.addLayer(m);
+    }
   });
 
   if(!mapUserMoved && list.length){
