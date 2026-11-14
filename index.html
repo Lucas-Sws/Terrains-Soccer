@@ -16,7 +16,7 @@
     --on-accent:#F1F3EC; --on-accent-dim:#9FB0A2;
     --floodlight:#2E7D4F;
     --libre:#2F9E5C; --bientot:#DE8A25; --signale:#3D7FC4;
-    --occupe:#D9483A; --ferme:#6B7280; --inconnu:#A7AEBB;
+    --occupe:#D9483A; --ferme:#6B7280; --reservable:#7B5CC4;
     --radius:10px; --shadow:0 8px 22px rgba(15,30,20,.14);
   }
   *{box-sizing:border-box;}
@@ -30,9 +30,8 @@
 
   /* ---------- Statuts (une seule définition de couleur par statut) ---------- */
   .s-libre{--c:var(--libre);} .s-bientot{--c:var(--bientot);} .s-signale{--c:var(--signale);}
-  .s-occupe{--c:var(--occupe);} .s-ferme{--c:var(--ferme);} .s-inconnu{--c:var(--inconnu);}
+  .s-occupe{--c:var(--occupe);} .s-ferme{--c:var(--ferme);} .s-reservable{--c:var(--reservable);}
   .status-dot,.sb-dot{width:8px;height:8px;border-radius:50%;background:var(--c);flex-shrink:0;display:inline-block;}
-  .s-inconnu .status-dot,.s-inconnu .sb-dot{background:repeating-linear-gradient(45deg,var(--inconnu) 0 2px,#fff 2px 4px);border:1px solid var(--inconnu);}
 
   /* ---------- Bandeau ---------- */
   header.top{
@@ -101,7 +100,7 @@
     display:flex;align-items:center;gap:5px;color:var(--c);
     background:color-mix(in srgb,var(--c) 13%,transparent);
   }
-  .s-inconnu.status-pill,.s-ferme.status-pill{color:#4b5563;}
+  .s-ferme.status-pill{color:#4b5563;}
   .card-meta{font-size:12px;color:var(--ink-dim);display:flex;justify-content:space-between;gap:8px;}
 
   /* ---------- Fiche ---------- */
@@ -132,9 +131,9 @@
   .timeline-row.now{font-weight:600;}
   .timeline-empty{font-size:12px;color:var(--ink-dim);line-height:1.4;}
   .timeline details summary{font-size:12px;font-weight:600;color:var(--floodlight);cursor:pointer;margin:2px 0 6px;}
-  .src-note{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--ink-dim);margin-top:6px;}
 
   .section{margin:10px 0;padding-top:10px;border-top:1px solid var(--line);}
+  .section .reserve-link:first-of-type{margin-top:6px;}
   .email-row{display:flex;align-items:center;gap:8px;font-size:13px;margin-top:6px;}
   .email-row .email-text{flex:1;color:var(--ink);word-break:break-all;}
   .copy-btn{font-size:12px;font-weight:600;padding:7px 11px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--ink);cursor:pointer;flex-shrink:0;}
@@ -147,10 +146,14 @@
   .reserve-link:hover{background:var(--accent-dark-2);}
   .reserve-link.secondary{background:var(--panel);border:1px solid var(--line);color:var(--ink);}
   .reserve-link.secondary:hover{border-color:var(--floodlight);color:var(--floodlight);}
+  .more-link{display:inline-block;margin:10px 0 0;font-size:12.5px;font-weight:600;color:var(--floodlight);text-decoration:none;}
+  .more-link:hover{text-decoration:underline;}
+  .notes-details{margin-top:10px;border-top:1px solid var(--line);padding-top:8px;}
+  .notes-details summary{font-family:'Teko',sans-serif;font-size:15px;text-transform:uppercase;letter-spacing:.03em;cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;}
+  .notes-details summary::-webkit-details-marker{display:none;}
+  .notes-details summary::after{content:'+';font-family:'IBM Plex Sans',sans-serif;font-size:18px;color:var(--ink-dim);}
+  .notes-details[open] summary::after{content:'–';}
   .notes-box{font-size:12px;color:var(--ink-dim);line-height:1.5;margin-top:6px;}
-  .notes-box.collapsed .n-full{display:none;}
-  .notes-box:not(.collapsed) .n-short{display:none;}
-  .notes-toggle{font-size:12px;color:var(--floodlight);cursor:pointer;font-weight:600;background:none;border:none;padding:0;}
 
   .btn{font-size:13px;font-weight:600;padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);cursor:pointer;width:100%;}
   .btn:hover{border-color:var(--floodlight);color:var(--floodlight);}
@@ -311,15 +314,14 @@ const SPORTS = [
 ];
 
 const STATUS = {
-  libre:   {label:'Libre maintenant',   short:'Libre',          color:'#2F9E5C', sort:5},
-  bientot: {label:'Bientôt occupé',     short:'Bientôt occupé', color:'#DE8A25', sort:4},
-  signale: {label:'Occupé mais ouvert', short:'Occupé · ouvert',color:'#3D7FC4', sort:3},
-  occupe:  {label:'Occupé',             short:'Occupé',         color:'#D9483A', sort:2},
-  inconnu: {label:'Non vérifié',        short:'Non vérifié',    color:'#A7AEBB', sort:1},
-  ferme:   {label:'Fermé',              short:'Fermé',          color:'#6B7280', sort:0},
+  libre:     {label:'Libre maintenant',   short:'Libre',          color:'#2F9E5C', sort:5},
+  bientot:   {label:'Bientôt occupé',     short:'Bientôt occupé', color:'#DE8A25', sort:4},
+  signale:   {label:'Occupé mais ouvert', short:'Occupé · ouvert',color:'#3D7FC4', sort:3},
+  reservable:{label:'Sur réservation',    short:'Sur réservation',color:'#7B5CC4', sort:2},
+  occupe:    {label:'Occupé',             short:'Occupé',         color:'#D9483A', sort:1},
+  ferme:     {label:'Fermé',              short:'Fermé',          color:'#6B7280', sort:0},
 };
-const STATUS_ORDER = ['libre','bientot','signale','occupe','ferme','inconnu'];
-const SOURCE_LABEL = {fixe:'horaires fixes', ville:'Ville de Montréal', calendrier:"calendrier de l'installation"};
+const STATUS_ORDER = ['libre','bientot','signale','occupe','reservable','ferme'];
 
 const MAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/positron';
 const MTL_TZ = 'America/Toronto';
@@ -371,7 +373,8 @@ function parseCSV(text){
      Jours,HeureDébut,HeureFin,DateDébut,DateFin,Statut,Étiquette
    - Jours : vide = tous les jours ; "Lundi" ou "Lun" ; plage "Lun-Ven" ; liste "Lun+Mer"
    - Dates : AAAA-MM-JJ, optionnelles
-   - Statut : libre | occupe | signale | ferme   ("bientot" et "inconnu" sont calculés)
+   - Statut : libre | occupe | signale | ferme   ("bientot" et "reservable" sont calculés)
+   - Étiquette "Heures d'ouverture" = horaire fixe d'ouverture (fermé en dehors)
    - L'étiquette peut contenir des virgules (tout ce qui suit le 6e champ)
    ===================================================================== */
 const DAY_KEYS = ['lun','mar','mer','jeu','ven','sam','dim'];
@@ -438,52 +441,58 @@ function slotsToday(t, now){
 }
 
 /* =====================================================================
-   STATUT EN DIRECT = reserved_slots × heure courante (100 % local)
-   La colonne "status" du CSV n'est qu'un instantané : elle n'est jamais utilisée ici.
+   STATUT EN DIRECT = règles simples + reserved_slots × heure courante
+   (100 % local, aucune requête, heure de Montréal)
 
-   Règles :
-   1. Aucun créneau publié (source muette / format changé)     → Non vérifié
-   2. Colonne optionnelle "verified_at" trop ancienne (> 48 h)  → Non vérifié
-   3. Créneau actif : le plus restrictif gagne (fermé > occupé > occupé·ouvert > libre)
-   4. Hors créneaux :
-        - des plages "libre" sont publiées → Fermé si ce sont des heures d'ouverture,
-          sinon Non vérifié (la Ville ne dit rien hors de ces plages : pas de faux vert)
-        - seulement des réservations/priorités → Libre (la Ville ne liste que les exceptions)
-   5. Libre + créneau "occupé" qui débute dans ≤ 30 min          → Bientôt occupé
+   1. Terrain EXTÉRIEUR du 1er décembre au 1er avril                → Fermé
+   2. Créneau actif (le plus restrictif gagne : fermé > occupé > occupé·ouvert > libre)
+        - fermé / occupé / occupé·ouvert                            → tel quel
+        - "Heures d'ouverture"                                      → accès par défaut (voir 5)
+        - plage de jeu libre explicite                              → Libre
+   3. Hors des heures d'ouverture publiées                          → Fermé
+   4. Libre + créneau "occupé" qui débute dans ≤ 30 min             → Bientôt occupé
+   5. Accès par défaut (rien de contraire publié) :
+        - calendrier partagé (calendar_url) ou réservation obligatoire → Sur réservation
+        - sinon                                                     → Libre
    ===================================================================== */
 const SEV = {ferme:4, occupe:3, signale:2, libre:1};
 const OPENING_RE = /heures?\s+d['’]ouverture/i;
+const isOpeningSlot = s => OPENING_RE.test(s.label);
 const SOON_MIN = 30;
-const STALE_HOURS = 48;
+const WINTER_NOTE = 'Fermé — saison hivernale (1er décembre au 1er avril)';
+
+function isWinter(now){ const p = now.date.split('-'); const md = (+p[1])*100 + (+p[2]); return md>=1201 || md<=401; }
 
 function effectiveStatus(t, now){
   now = now || montrealNow();
-  if(!t.slots.length) return {status:'inconnu', note:'Horaires non publiés pour ce terrain'};
-  if(t.verifiedAt && t.statusSource!=='fixe'){
-    const ts = Date.parse(t.verifiedAt);
-    if(!isNaN(ts) && now.ts-ts > STALE_HOURS*3600*1000) return {status:'inconnu', note:'Horaires non revérifiés récemment'};
-  }
+  if(t.lieu==='Extérieur' && isWinter(now)) return {status:'ferme', note:WINTER_NOTE};
+
   const today = slotsToday(t, now);
   const soonOccupied = ()=> today.find(s=>s.status==='occupe' && s.start>now.min && s.start-now.min<=SOON_MIN);
+  const soonNote = n => `Occupé dans ${n.start-now.min} min${n.label?` — ${n.label}`:''}`;
+  const byDefault = extra => {
+    if(t.calendarUrl)  return {status:'reservable', note:'Disponibilité selon le calendrier'+extra};
+    if(t.mustReserve)  return {status:'reservable', note:'Réservation obligatoire'+extra};
+    const n = soonOccupied();
+    if(n) return {status:'bientot', note:soonNote(n)};
+    return {status:'libre', note:'Accès libre'+extra};
+  };
 
   const active = today.filter(s=>s.start<=now.min && now.min<s.end);
   if(active.length){
     const s = active.reduce((a,b)=>SEV[b.status]>SEV[a.status]?b:a);
+    const until = s.end<1440 ? ` jusqu'à ${fmtMin(s.end)}` : '';
     if(s.status==='ferme') return {status:'ferme', note:s.label||'Fermé'};
     if(s.status==='libre'){
+      if(isOpeningSlot(s)) return byDefault(` · ouvert${until}`);
+      if(t.calendarUrl) return {status:'reservable', note:'Disponibilité selon le calendrier'};
       const n = soonOccupied();
-      if(n) return {status:'bientot', note:`Occupé dans ${n.start-now.min} min — ${n.label}`};
+      if(n) return {status:'bientot', note:soonNote(n)};
     }
-    return {status:s.status, note:`${s.label}${s.end<1440?` jusqu'à ${fmtMin(s.end)}`:''}`};
+    return {status:s.status, note:`${s.label}${until}`};
   }
-
-  if(t.slots.some(s=>s.status==='libre')){
-    if(t.slots.every(s=>OPENING_RE.test(s.label))) return {status:'ferme', note:"Hors des heures d'ouverture"};
-    return {status:'inconnu', note:'Hors des plages de jeu libre publiées'};
-  }
-  const n = soonOccupied();
-  if(n) return {status:'bientot', note:`Occupé dans ${n.start-now.min} min — ${n.label}`};
-  return {status:'libre', note:'Aucune réservation en cours'};
+  if(t.hasHours) return {status:'ferme', note:"Fermé — hors des heures d'ouverture"};
+  return byDefault('');
 }
 
 /* =====================================================================
@@ -519,11 +528,12 @@ async function loadTerrains(){
         format:cleanText(r.format), capacity:Number(r.capacity)||0,
         surface:cleanText(r.surface), lieu:cleanText(r.interieur_exterieur), access:cleanText(r.access),
         reserveUrl:safeUrl(r.reserveUrl), montrealUrl:safeUrl(r.montrealUrl), calendarUrl:safeUrl(r.calendar_url),
-        statusSource:norm(r.status_source), verifiedAt:r.verified_at||'',
         photoUrl:resolvePhoto(sport, r.photo_url),
         slots:parseSlots(r.reserved_slots), notes:cleanText(r.notes),
       };
       t.hasCoords = isFinite(t.lat) && isFinite(t.lng);
+      t.hasHours = t.slots.some(isOpeningSlot);
+      t.mustReserve = /obligatoire/.test(norm(t.access));
       t.formatTags = t.format.split(',').map(s=>s.trim()).filter(Boolean);
       return t;
     });
@@ -668,10 +678,9 @@ function renderListBody(list){
 }
 
 function renderTimeline(t){
-  if(!t.slots.length) return `<div class="timeline-empty">Horaires non publiés pour ce terrain — impossible de confirmer sa disponibilité.</div>`;
+  if(!t.slots.length) return '';
   const now = montrealNow();
   const rows = slotsToday(t, now);
-  if(!rows.length) return `<div class="timeline-empty">Aucun créneau publié aujourd'hui.</div>`;
   const row = s => {
     const allDay = s.start===0 && s.end>=1440;
     const live = now.min>=s.start && now.min<s.end;
@@ -680,33 +689,37 @@ function renderTimeline(t){
       <span class="hrs">${allDay?'Toute la journée':`${fmtMin(s.start)}–${fmtMin(s.end)}`}</span>${esc(s.label||STATUS[s.status].short)}
     </div>`;
   };
-  const head = rows.slice(0,4).map(row).join('');
-  const more = rows.slice(4);
-  return head + (more.length ? `<details><summary>+ ${more.length} autre${more.length>1?'s':''} créneau${more.length>1?'x':''}</summary>${more.map(row).join('')}</details>` : '');
+  const body = !rows.length ? `<div class="timeline-empty">Aucun créneau publié aujourd'hui.</div>`
+    : rows.slice(0,4).map(row).join('') + (rows.length>4 ? `<details><summary>+ ${rows.length-4} autre${rows.length>5?'s':''}</summary>${rows.slice(4).map(row).join('')}</details>` : '');
+  return `<div class="timeline"><h3>Horaires du jour</h3>${body}</div>`;
 }
 
+function calendarLabel(u){
+  if(/calendar|agenda/i.test(u)) return 'Voir le calendrier';
+  if(/etat|état/i.test(u)) return "Voir l'état des terrains";
+  return "Site de l'installation";
+}
 function renderReservation(t){
-  if(!t.reserveUrl) return '';
-  let inner;
+  const parts = [];
+  if(t.calendarUrl) parts.push(`<a class="reserve-link" href="${esc(t.calendarUrl)}" target="_blank" rel="noopener">${calendarLabel(t.calendarUrl)} ↗</a>`);
   if(t.reserveUrl.startsWith('mailto:')){
     const email = t.reserveUrl.slice(7);
-    inner = `<div class="email-row"><span class="email-text">${esc(email)}</span><button class="copy-btn" data-act="copy" data-copy="${esc(email)}">Copier</button></div>`;
+    parts.push(`<div class="email-row"><span class="email-text">${esc(email)}</span><button class="copy-btn" data-act="copy" data-copy="${esc(email)}">Copier</button></div>`);
   }else if(t.reserveUrl.startsWith('tel:')){
     const phone = t.reserveUrl.replace(/^tel:\+?1?/,'').replace(/(\d{3})(\d{3})(\d{4})/,'$1-$2-$3');
-    inner = `<a class="reserve-link" href="${esc(t.reserveUrl)}">Appeler — ${esc(phone)}</a>`;
-  }else{
-    inner = `<a class="reserve-link" href="${esc(t.reserveUrl)}" target="_blank" rel="noopener">Réservation officielle / infos</a>`;
+    parts.push(`<a class="reserve-link" href="${esc(t.reserveUrl)}">Appeler — ${esc(phone)}</a>`);
+  }else if(t.reserveUrl){
+    parts.push(`<a class="reserve-link" href="${esc(t.reserveUrl)}" target="_blank" rel="noopener">Réserver / infos ↗</a>`);
   }
-  return `<div class="section"><h3>Réserver</h3>${inner}</div>`;
+  const official = t.montrealUrl && t.montrealUrl!==t.calendarUrl && t.montrealUrl!==t.reserveUrl
+    ? `<a class="more-link" href="${esc(t.montrealUrl)}" target="_blank" rel="noopener">Fiche officielle ↗</a>` : '';
+  if(!parts.length && !official) return '';
+  return `<div class="section">${parts.length?`<h3>Réserver</h3>${parts.join('')}`:''}${official?`<div>${official}</div>`:''}</div>`;
 }
 
 function renderNotes(t){
   if(!t.notes) return '';
-  const long = t.notes.length > 90;
-  return `<div class="section"><h3>Détails</h3>
-    <div class="notes-box ${long?'collapsed':''}">
-      ${long?`<span class="n-short">${esc(t.notes.slice(0,90))}… </span><span class="n-full">${linkify(t.notes)} </span><button class="notes-toggle" data-act="notes-toggle">Voir plus</button>`:linkify(t.notes)}
-    </div></div>`;
+  return `<details class="notes-details"><summary>Détails</summary><div class="notes-box">${linkify(t.notes)}</div></details>`;
 }
 
 function openDetail(id, opts={}){
@@ -724,11 +737,6 @@ function openDetail(id, opts={}){
   t.formatTags.forEach(f=>tags.push(`<span class="tag">${esc(f)}</span>`));
   if(t.surface) tags.push(`<span class="tag">${esc(t.surface)}</span>`);
   if(t.access) tags.push(`<span class="tag">${esc(t.access)}</span>`);
-  if(t.capacity) tags.push(`<span class="tag">${t.capacity} joueurs</span>`);
-
-  const links = [];
-  if(t.montrealUrl) links.push(`<a class="reserve-link secondary" href="${esc(t.montrealUrl)}" target="_blank" rel="noopener">Fiche officielle</a>`);
-  if(t.calendarUrl && t.calendarUrl!==t.montrealUrl) links.push(`<a class="reserve-link secondary" href="${esc(t.calendarUrl)}" target="_blank" rel="noopener">Source des horaires</a>`);
 
   const prev = $('sidebar').querySelector('.detail');
   const top = prev ? prev.scrollTop : 0;
@@ -742,13 +750,8 @@ function openDetail(id, opts={}){
         <div>${esc(STATUS[e.status].label)}${e.note?`<small>${esc(e.note)}</small>`:''}</div>
       </div>
       ${tags.length?`<div class="tag-row">${tags.join('')}</div>`:''}
-      <div class="timeline">
-        <h3>Planning du jour</h3>
-        ${renderTimeline(t)}
-        ${SOURCE_LABEL[t.statusSource]?`<div class="src-note">Source : ${esc(SOURCE_LABEL[t.statusSource])}</div>`:''}
-      </div>
+      ${renderTimeline(t)}
       ${renderReservation(t)}
-      ${links.join('')}
       ${renderNotes(t)}
     </div>`;
   if(opts.silent && prev) $('sidebar').querySelector('.detail').scrollTop = top;
@@ -840,7 +843,7 @@ const FALLBACK_STYLE = {
 };
 
 // Pin « goutte » dessiné en canvas, une image par statut
-function makePinImage(color, glyph){
+function makePinImage(color){
   const W=44, H=58, c=document.createElement('canvas'); c.width=W; c.height=H;
   const x=c.getContext('2d');
   x.beginPath();
@@ -850,7 +853,6 @@ function makePinImage(color, glyph){
   x.fillStyle=color; x.fill();
   x.lineWidth=2.5; x.strokeStyle='rgba(0,0,0,.28)'; x.stroke();
   x.beginPath(); x.arc(22,21,7.5,0,Math.PI*2); x.fillStyle='#fff'; x.fill();
-  if(glyph){ x.fillStyle=color; x.font='bold 13px sans-serif'; x.textAlign='center'; x.textBaseline='middle'; x.fillText(glyph,22,22); }
   return x.getImageData(0,0,W,H);
 }
 
@@ -887,7 +889,7 @@ async function initMap(){
 
 function onMapLoad(){
   STATUS_ORDER.forEach(k=>{
-    map.addImage('pin-'+k, makePinImage(STATUS[k].color, k==='inconnu'?'?':''), {pixelRatio:2});
+    map.addImage('pin-'+k, makePinImage(STATUS[k].color), {pixelRatio:2});
   });
   map.addSource('terrains', {type:'geojson', data:pendingFC||{type:'FeatureCollection',features:[]}, cluster:true, clusterRadius:46, clusterMaxZoom:14});
 
@@ -1022,9 +1024,6 @@ document.addEventListener('click', ev=>{
     case 'tab-list':    selectedId=null; applySelection(); renderSidebarList(); setView('list'); break;
     case 'sport':       setSport(el.dataset.sport); break;
     case 'copy':        copyText(el.dataset.copy, el); break;
-    case 'notes-toggle':{
-      const box = el.closest('.notes-box'); box.classList.toggle('collapsed');
-      el.textContent = box.classList.contains('collapsed') ? 'Voir plus' : 'Voir moins'; break; }
     case 'toggle-filter':{
       const set = activeFilters[el.dataset.key], v = el.dataset.val;
       if(set.has(v)) set.delete(v); else set.add(v);
