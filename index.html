@@ -351,12 +351,22 @@
 /* =====================================================================
    CONFIG / DONNÉES
    ===================================================================== */
+// Chaque sport a son dossier à la racine du site : <id>/terrains.csv et <id>/images/
+// Pour ajouter un sport : créer le dossier, y mettre terrains.csv + images/, puis passer enabled à true.
 const SPORTS = [
   {id:'soccer', label:'Soccer', enabled:true},
   {id:'tennis', label:'Tennis', enabled:false},
   {id:'patinoire', label:'Patinoires', enabled:false},
   {id:'piscine', label:'Piscines', enabled:false},
 ];
+
+// photo_url : un nom de fichier seul (MTL1.jpg) est cherché dans <sport>/images/ ; une URL complète ou un chemin avec / est gardé tel quel
+function resolvePhoto(sport, p){
+  if(!p) return '';
+  p = String(p).trim();
+  if(/^(https?:)?\/\//.test(p) || p.includes('/')) return p;
+  return sport + '/images/' + p;
+}
 
 const STATUS_LABEL = {
   libre:'Libre maintenant',
@@ -371,11 +381,15 @@ let TERRAINS = [];
 async function loadTerrainsFromCSV(){
   const statusEl = document.getElementById('loadError');
   try{
-    const res = await fetch('terrains.csv?t=' + Date.now());
-    if(!res.ok) throw new Error('terrains.csv introuvable (' + res.status + ')');
-    const text = await res.text();
-    const parsed = Papa.parse(text, {header:true, dynamicTyping:true, skipEmptyLines:true});
-    TERRAINS = parsed.data
+    const all = [];
+    for(const s of SPORTS.filter(x=>x.enabled)){
+      const res = await fetch(s.id + '/terrains.csv?t=' + Date.now());
+      if(!res.ok) throw new Error(s.id + '/terrains.csv introuvable (' + res.status + ')');
+      const text = await res.text();
+      const parsed = Papa.parse(text, {header:true, dynamicTyping:true, skipEmptyLines:true});
+      parsed.data.forEach(r=>{ r.__sport = s.id; all.push(r); });
+    }
+    TERRAINS = all
       .filter(row => row.id)
       .map(row => ({
         id: String(row.id),
@@ -383,7 +397,7 @@ async function loadTerrainsFromCSV(){
         addr: row.addr,
         lat: row.lat,
         lng: row.lng,
-        sport: row.sport || 'soccer',
+        sport: row.sport || row.__sport,
         format: row.format || '',
         capacity: Number(row.capacity) || 0,
         surface: row.surface || '',
@@ -391,7 +405,7 @@ async function loadTerrainsFromCSV(){
         montrealUrl: row.montrealUrl || '',
         reserveUrl: row.reserveUrl || '',
         embedUrl: row.embed_url || '',
-        photoUrl: row.photo_url || '',
+        photoUrl: resolvePhoto(row.sport || row.__sport, row.photo_url),
         base: row.status || 'libre',
         reservedSlots: parseSlots(row.reserved_slots),
         notes: row.notes || '',
@@ -407,7 +421,7 @@ async function loadTerrainsFromCSV(){
     console.error('Échec du chargement de terrains.csv :', e);
     if(statusEl){
       statusEl.style.display = 'block';
-      statusEl.textContent = 'terrains.csv n\'a pas pu être chargé — vérifie qu\'il est bien dans le même dossier que ce fichier.';
+      statusEl.textContent = 'Le fichier terrains.csv n\'a pas pu être chargé — vérifie qu\'il est dans soccer/terrains.csv (dossier à côté de index.html).';
     }
   }
 }
