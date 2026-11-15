@@ -15,8 +15,8 @@
     --accent-dark:#122A1C; --accent-dark-2:#1C3C28;
     --on-accent:#F1F3EC; --on-accent-dim:#9FB0A2;
     --floodlight:#2E7D4F;
-    --libre:#2F9E5C; --bientot:#DE8A25; --signale:#3D7FC4;
-    --occupe:#D9483A; --ferme:#6B7280; --reservable:#7B5CC4;
+    --libre:#2F9E5C;
+    --occupe:#D9483A; --ferme:#6B7280;
     --radius:10px; --shadow:0 8px 22px rgba(15,30,20,.14);
   }
   *{box-sizing:border-box;}
@@ -29,8 +29,8 @@
   .app{display:flex;flex-direction:column;height:100vh;height:100dvh;}
 
   /* ---------- Statuts (une seule définition de couleur par statut) ---------- */
-  .s-libre{--c:var(--libre);} .s-bientot{--c:var(--bientot);} .s-signale{--c:var(--signale);}
-  .s-occupe{--c:var(--occupe);} .s-ferme{--c:var(--ferme);} .s-reservable{--c:var(--reservable);}
+  .s-libre{--c:var(--libre);}
+  .s-occupe{--c:var(--occupe);} .s-ferme{--c:var(--ferme);}
   .status-dot,.sb-dot{width:8px;height:8px;border-radius:50%;background:var(--c);flex-shrink:0;display:inline-block;}
 
   /* ---------- Bandeau ---------- */
@@ -314,14 +314,12 @@ const SPORTS = [
 ];
 
 const STATUS = {
-  libre:     {label:'Libre maintenant',   short:'Libre',          color:'#2F9E5C', sort:5},
-  bientot:   {label:'Bientôt occupé',     short:'Bientôt occupé', color:'#DE8A25', sort:4},
-  signale:   {label:'Occupé mais ouvert', short:'Occupé · ouvert',color:'#3D7FC4', sort:3},
-  reservable:{label:'Sur réservation',    short:'Sur réservation',color:'#7B5CC4', sort:2},
-  occupe:    {label:'Occupé',             short:'Occupé',         color:'#D9483A', sort:1},
-  ferme:     {label:'Fermé',              short:'Fermé',          color:'#6B7280', sort:0},
+  libre:     {label:'Libre',   short:'Libre',  color:'#2F9E5C', sort:2},
+  occupe:    {label:'Occupé',  short:'Occupé', color:'#D9483A', sort:1},
+  ferme:     {label:'Fermé',   short:'Fermé',  color:'#6B7280', sort:0},
 };
-const STATUS_ORDER = ['libre','bientot','signale','occupe','reservable','ferme'];
+const STATUS_ORDER = ['libre','occupe','ferme'];
+const ACCESS_ORDER = ['Accès libre','Réservation gratuite','Réservation payante'];
 
 const MAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/positron';
 const MTL_TZ = 'America/Toronto';
@@ -373,7 +371,7 @@ function parseCSV(text){
      Jours,HeureDébut,HeureFin,DateDébut,DateFin,Statut,Étiquette
    - Jours : vide = tous les jours ; "Lundi" ou "Lun" ; plage "Lun-Ven" ; liste "Lun+Mer"
    - Dates : AAAA-MM-JJ, optionnelles
-   - Statut : libre | occupe | signale | ferme   ("bientot" et "reservable" sont calculés)
+   - Statut : libre | occupe | ferme
    - Étiquette "Heures d'ouverture" = horaire fixe d'ouverture (fermé en dehors)
    - L'étiquette peut contenir des virgules (tout ce qui suit le 6e champ)
    ===================================================================== */
@@ -393,7 +391,7 @@ function parseDays(field){
   return set;
 }
 function toMin(s){ const m=/^(\d{1,2}):(\d{2})$/.exec(String(s||'').trim()); return m ? (+m[1])*60+(+m[2]) : null; }
-const SLOT_STATUS = {libre:'libre', occupe:'occupe', signale:'signale', ferme:'ferme'};
+const SLOT_STATUS = {libre:'libre', occupe:'occupe', signale:'occupe', ferme:'ferme'};   // « signale » (ancien) = occupé
 
 function parseSlots(raw){
   if(!raw) return [];
@@ -441,24 +439,21 @@ function slotsToday(t, now){
 }
 
 /* =====================================================================
-   STATUT EN DIRECT = règles simples + reserved_slots × heure courante
-   (100 % local, aucune requête, heure de Montréal)
+   STATUT EN DIRECT — 3 états seulement : Libre, Occupé, Fermé
+   (reserved_slots × heure de Montréal, 100 % local, aucune requête)
 
-   1. Terrain EXTÉRIEUR du 1er décembre au 1er avril                → Fermé
-   2. Créneau actif (le plus restrictif gagne : fermé > occupé > occupé·ouvert > libre)
-        - fermé / occupé / occupé·ouvert                            → tel quel
-        - "Heures d'ouverture"                                      → accès par défaut (voir 5)
-        - plage de jeu libre explicite                              → Libre
-   3. Hors des heures d'ouverture publiées                          → Fermé
-   4. Libre + créneau "occupé" qui débute dans ≤ 30 min             → Bientôt occupé
-   5. Accès par défaut (rien de contraire publié) :
-        - calendrier partagé (calendar_url) ou accès « Réservation payante » → Sur réservation
-        - sinon                                                     → Libre
+   1. Terrain EXTÉRIEUR du 1er décembre au 1er avril   → Fermé
+   2. Créneau actif (le plus restrictif gagne : fermé > occupé > libre)
+        - fermé / occupé                               → tel quel
+        - libre ou « Heures d'ouverture »              → Libre
+   3. Hors des heures d'ouverture publiées             → Fermé
+   4. Rien de contraire publié                         → Libre
+   Le mode d'accès (accès libre / réservation gratuite / payante) est
+   une information à part : voir t.accessTags.
    ===================================================================== */
-const SEV = {ferme:4, occupe:3, signale:2, libre:1};
+const SEV = {ferme:3, occupe:2, libre:1};
 const OPENING_RE = /heures?\s+d['’]ouverture/i;
 const isOpeningSlot = s => OPENING_RE.test(s.label);
-const SOON_MIN = 30;
 const WINTER_NOTE = 'Fermé — saison hivernale (1er décembre au 1er avril)';
 
 function isWinter(now){ const p = now.date.split('-'); const md = (+p[1])*100 + (+p[2]); return md>=1201 || md<=401; }
@@ -466,33 +461,16 @@ function isWinter(now){ const p = now.date.split('-'); const md = (+p[1])*100 + 
 function effectiveStatus(t, now){
   now = now || montrealNow();
   if(t.lieu==='Extérieur' && isWinter(now)) return {status:'ferme', note:WINTER_NOTE};
-
-  const today = slotsToday(t, now);
-  const soonOccupied = ()=> today.find(s=>s.status==='occupe' && s.start>now.min && s.start-now.min<=SOON_MIN);
-  const soonNote = n => `Occupé dans ${n.start-now.min} min${n.label?` — ${n.label}`:''}`;
-  const byDefault = extra => {
-    if(t.calendarUrl)  return {status:'reservable', note:'Disponibilité selon le calendrier'+extra};
-    if(t.mustReserve)  return {status:'reservable', note:(t.access||'Réservation requise')+extra};
-    const n = soonOccupied();
-    if(n) return {status:'bientot', note:soonNote(n)};
-    return {status:'libre', note:'Accès libre'+extra};
-  };
-
-  const active = today.filter(s=>s.start<=now.min && now.min<s.end);
+  const active = slotsToday(t, now).filter(s=>s.start<=now.min && now.min<s.end);
   if(active.length){
     const s = active.reduce((a,b)=>SEV[b.status]>SEV[a.status]?b:a);
     const until = s.end<1440 ? ` jusqu'à ${fmtMin(s.end)}` : '';
     if(s.status==='ferme') return {status:'ferme', note:s.label||'Fermé'};
-    if(s.status==='libre'){
-      if(isOpeningSlot(s)) return byDefault(` · ouvert${until}`);
-      if(t.calendarUrl) return {status:'reservable', note:'Disponibilité selon le calendrier'};
-      const n = soonOccupied();
-      if(n) return {status:'bientot', note:soonNote(n)};
-    }
-    return {status:s.status, note:`${s.label}${until}`};
+    if(s.status==='occupe') return {status:'occupe', note:`${s.label}${until}`};
+    return {status:'libre', note: isOpeningSlot(s) ? `Ouvert${until}` : `${s.label}${until}`};
   }
   if(t.hasHours) return {status:'ferme', note:"Fermé — hors des heures d'ouverture"};
-  return byDefault('');
+  return {status:'libre', note:'Aucune restriction publiée'};
 }
 
 /* =====================================================================
@@ -533,7 +511,15 @@ async function loadTerrains(){
       };
       t.hasCoords = isFinite(t.lat) && isFinite(t.lng);
       t.hasHours = t.slots.some(isOpeningSlot);
-      t.mustReserve = /payante|obligatoire/.test(norm(t.access));   // colonne access : « Accès libre » | « Réservation payante »
+      // Modes d'accès (un terrain peut en avoir plusieurs), dérivés des colonnes :
+      //  - access = « Accès libre »        → Accès libre ; + Réservation gratuite si reserveUrl ou calendar_url
+      //  - access = « Réservation payante » → Réservation payante ; + Accès libre si créneaux de jeu libre publiés
+      const a = norm(t.access), tags = [];
+      const freeSlots = t.slots.some(s=>s.status==='libre' && !isOpeningSlot(s));
+      if(/payante/.test(a)) tags.push('Réservation payante');
+      if(/libre/.test(a) || freeSlots) tags.push('Accès libre');
+      if(/libre/.test(a) && (t.reserveUrl || t.calendarUrl)) tags.push('Réservation gratuite');
+      t.accessTags = ACCESS_ORDER.filter(x=>tags.includes(x));
       t.formatTags = t.format.split(',').map(s=>s.trim()).filter(Boolean);
       return t;
     });
@@ -579,7 +565,7 @@ const FILTERS = [
   {key:'lieu',    label:'Lieu',    get:t=>t.lieu?[t.lieu]:[],       values:()=>distinct(t=>t.lieu?[t.lieu]:[])},
   {key:'format',  label:'Format',  get:t=>t.formatTags,             values:()=>distinct(t=>t.formatTags).sort((a,b)=>FORMAT_RANK(b)-FORMAT_RANK(a))},
   {key:'surface', label:'Surface', get:t=>t.surface?[t.surface]:[], values:()=>distinct(t=>t.surface?[t.surface]:[])},
-  {key:'access',  label:'Accès',   get:t=>t.access?[t.access]:[],   values:()=>distinct(t=>t.access?[t.access]:[])},
+  {key:'access',  label:'Accès',   get:t=>t.accessTags,   values:()=>ACCESS_ORDER},
 ];
 function distinct(getter){
   const s = new Set();
@@ -736,7 +722,7 @@ function openDetail(id, opts={}){
   if(t.lieu) tags.push(`<span class="tag lieu">${esc(t.lieu)}</span>`);
   t.formatTags.forEach(f=>tags.push(`<span class="tag">${esc(f)}</span>`));
   if(t.surface) tags.push(`<span class="tag">${esc(t.surface)}</span>`);
-  if(t.access) tags.push(`<span class="tag">${esc(t.access)}</span>`);
+  t.accessTags.forEach(a=>tags.push(`<span class="tag">${esc(a)}</span>`));
 
   const prev = $('sidebar').querySelector('.detail');
   const top = prev ? prev.scrollTop : 0;
