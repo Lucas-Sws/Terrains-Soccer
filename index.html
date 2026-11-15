@@ -452,7 +452,7 @@ function slotsToday(t, now){
    3. Hors des heures d'ouverture publiées                          → Fermé
    4. Libre + créneau "occupé" qui débute dans ≤ 30 min             → Bientôt occupé
    5. Accès par défaut (rien de contraire publié) :
-        - calendrier partagé (calendar_url) ou réservation obligatoire → Sur réservation
+        - calendrier partagé (calendar_url) ou accès « Réservation payante » → Sur réservation
         - sinon                                                     → Libre
    ===================================================================== */
 const SEV = {ferme:4, occupe:3, signale:2, libre:1};
@@ -472,7 +472,7 @@ function effectiveStatus(t, now){
   const soonNote = n => `Occupé dans ${n.start-now.min} min${n.label?` — ${n.label}`:''}`;
   const byDefault = extra => {
     if(t.calendarUrl)  return {status:'reservable', note:'Disponibilité selon le calendrier'+extra};
-    if(t.mustReserve)  return {status:'reservable', note:'Réservation obligatoire'+extra};
+    if(t.mustReserve)  return {status:'reservable', note:(t.access||'Réservation requise')+extra};
     const n = soonOccupied();
     if(n) return {status:'bientot', note:soonNote(n)};
     return {status:'libre', note:'Accès libre'+extra};
@@ -533,7 +533,7 @@ async function loadTerrains(){
       };
       t.hasCoords = isFinite(t.lat) && isFinite(t.lng);
       t.hasHours = t.slots.some(isOpeningSlot);
-      t.mustReserve = /obligatoire/.test(norm(t.access));
+      t.mustReserve = /payante|obligatoire/.test(norm(t.access));   // colonne access : « Accès libre » | « Réservation payante »
       t.formatTags = t.format.split(',').map(s=>s.trim()).filter(Boolean);
       return t;
     });
