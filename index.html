@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#122A1C">
-<title>Stadio — Terrains de soccer à Montréal</title>
+<title>Stadio — Terrains et piscines à Montréal</title>
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Teko:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -256,9 +256,9 @@
     <div class="wordmark">
       <span class="dot"></span>
       <h1>Stadio</h1>
-      <span class="tag">terrains de soccer de Montréal, en direct</span>
+      <span class="tag">terrains et piscines de Montréal, en direct</span>
     </div>
-    <div class="top-meta">mise à jour <b id="clock">--:--</b> · <span id="counter">-- terrains</span></div>
+    <div class="top-meta">mise à jour <b id="clock">--:--</b> · <span id="counter">--</span></div>
   </header>
 
   <div id="loadError"></div>
@@ -295,7 +295,7 @@
   <div class="sheet-body" id="filterBody"></div>
   <div class="sheet-foot">
     <button class="btn ghost" data-act="clear-filters">Réinitialiser</button>
-    <button class="btn primary" data-act="close-filters" id="filterApply">Voir les terrains</button>
+    <button class="btn primary" data-act="close-filters" id="filterApply">Voir les résultats</button>
   </div>
 </section>
 
@@ -303,14 +303,23 @@
 <script>
 /* =====================================================================
    CONFIG
-   Chaque sport a son dossier à la racine du site : <id>/terrains.csv et <id>/images/
+   Chaque sport a son dossier à la racine du site : soccer/terrains.csv, piscine/piscines.csv, et <dossier>/images/
    ===================================================================== */
 const SPORTS = [
-  {id:'soccer', label:'Soccer', enabled:true},
-  {id:'tennis', label:'Tennis', enabled:false},
-  {id:'patinoire', label:'Patinoires', enabled:false},
-  {id:'piscine', label:'Piscines', enabled:false},
+  {id:'soccer',    label:'Soccer',     enabled:true, folder:'soccer',  file:'terrains.csv',
+   noun:{sg:'terrain', pl:'terrains', none:'Aucun terrain', title:'Terrains'},
+   filters:['status','lieu','format','surface','access']},
+  {id:'piscine',   label:'Piscines',   enabled:true, folder:'piscine', file:'piscines.csv',
+   noun:{sg:'piscine', pl:'piscines', none:'Aucune piscine', title:'Piscines'},
+   statusLabels:{libre:'Ouvert', occupe:'Occupé', ferme:'Fermé'},
+   filters:['status','lieu','prix','equip']},
+  {id:'tennis',    label:'Tennis',     enabled:false, folder:'tennis',    file:'terrains.csv'},
+  {id:'patinoire', label:'Patinoires', enabled:false, folder:'patinoire', file:'patinoires.csv'},
 ];
+const SPORT = id => SPORTS.find(s=>s.id===(id||activeSport)) || SPORTS[0];
+const NOUN  = n => `${n} ${n>1?SPORT().noun.pl:SPORT().noun.sg}`;
+// Libellés de statut propres à chaque sport (piscines : Ouvert / Occupé / Fermé)
+const stText = k => ((SPORT().statusLabels)||{})[k] || STATUS[k].short;
 
 const STATUS = {
   libre:     {label:'Libre',   short:'Libre',  color:'#2F9E5C', sort:2},
@@ -390,8 +399,15 @@ function parseDays(field){
   return set;
 }
 function toMin(s){ const m=/^(\d{1,2}):(\d{2})$/.exec(String(s||'').trim()); return m ? (+m[1])*60+(+m[2]) : null; }
-const SLOT_STATUS = {libre:'libre', occupe:'occupe', signale:'occupe', ferme:'ferme'};   // « signale » (ancien) = occupé
+const SLOT_STATUS = {libre:'libre', occupe:'occupe', signale:'occupe', ferme:'ferme',
+  'bain libre':'libre', 'longueurs':'occupe'};   // piscines : bain libre = ouvert ; longueurs seulement = occupé   // « signale » (ancien) = occupé
 
+const POOL_TYPE = {'bain libre':'Bain libre', 'longueurs':'Longueurs seulement'};
+function slotLabel(p){
+  const type = POOL_TYPE[norm(p[5])], rest = p.slice(6).join(',').trim();
+  if(!type) return rest;
+  return rest && norm(rest)!=='tous' ? `${type} — ${rest}` : type;
+}
 function parseSlots(raw){
   if(!raw) return [];
   return String(raw).split(/\s*\|\s*/).map(c=>c.trim()).filter(Boolean).map(chunk=>{
@@ -408,7 +424,7 @@ function parseSlots(raw){
       days, start, end, status,
       dateStart: iso.test(p[3].trim()) ? p[3].trim() : null,
       dateEnd:   iso.test(p[4].trim()) ? p[4].trim() : null,
-      label: p.slice(6).join(',').trim(),
+      label: slotLabel(p),
     };
   }).filter(Boolean);
 }
@@ -457,8 +473,44 @@ const WINTER_NOTE = 'Fermé — saison hivernale (1er décembre au 1er avril)';
 
 function isWinter(now){ const p = now.date.split('-'); const md = (+p[1])*100 + (+p[2]); return md>=1201 || md<=401; }
 
+/* ---- PISCINES : Ouvert / Occupé / Fermé
+   1. Piscine extérieure hors saison (dates du champ notes, sinon 15 juin → 7 sept.) → Fermé
+   2. Créneau actif : « bain libre » → Ouvert ; « longueurs seulement » → Occupé ; fermé → Fermé
+   3. Des horaires sont publiés mais aucun n'est actif → Fermé (avec prochaine ouverture du jour)
+   4. Aucun horaire publié → Ouvert (à confirmer)                                          */
+const POOL_SEASON_DEFAULT = {from:615, to:907};
+const MONTHS = {janvier:1,fevrier:2,mars:3,avril:4,mai:5,juin:6,juillet:7,aout:8,septembre:9,octobre:10,novembre:11,decembre:12};
+function parseSeason(notes){
+  const m = /(\d{1,2})(?:er)?\s+([a-zéûè]+)\s+au\s+(\d{1,2})(?:er)?\s+([a-zéûè]+)/i.exec(notes||'');
+  if(!m) return POOL_SEASON_DEFAULT;
+  const a = MONTHS[norm(m[2])], b = MONTHS[norm(m[4])];
+  return (a&&b) ? {from:a*100+(+m[1]), to:b*100+(+m[3])} : POOL_SEASON_DEFAULT;
+}
+const fmtMD = n => { const mo=Math.floor(n/100), d=n%100; return `${d===1?'1er':d} ${Object.keys(MONTHS)[mo-1].replace('fevrier','février').replace('aout','août').replace('decembre','décembre')}`; };
+function poolStatus(t, now){
+  if(t.outdoorOnly){
+    const p = now.date.split('-'), md = (+p[1])*100 + (+p[2]);
+    if(md<t.season.from || md>t.season.to) return {status:'ferme', note:`Fermé — saison estivale (${fmtMD(t.season.from)} au ${fmtMD(t.season.to)})`};
+  }
+  const today = slotsToday(t, now);
+  const active = today.filter(s=>s.start<=now.min && now.min<s.end);
+  const until = s => s.end<1440 ? ` jusqu'à ${fmtMin(s.end)}` : '';
+  if(active.length){
+    const open = active.find(s=>s.status==='libre');
+    if(open) return {status:'libre', note:`${open.label}${until(open)}`};
+    const s = active[0];
+    return {status:'occupe', note:`${s.label}${until(s)} — bain libre non offert`};
+  }
+  if(t.slots.length){
+    const next = today.filter(s=>s.start>now.min && s.status==='libre')[0];
+    return {status:'ferme', note: next ? `Fermé — prochain bain libre à ${fmtMin(next.start)}` : "Fermé — hors des heures de bain libre"};
+  }
+  return {status:'libre', note:'Horaire non publié — à confirmer'};
+}
+
 function effectiveStatus(t, now){
   now = now || montrealNow();
+  if(t.sport==='piscine') return poolStatus(t, now);
   if(t.lieu==='Extérieur' && isWinter(now)) return {status:'ferme', note:WINTER_NOTE};
   const active = slotsToday(t, now).filter(s=>s.start<=now.min && now.min<s.end);
   if(active.length){
@@ -480,58 +532,103 @@ let statusCache = new Map();
 const byId = id => TERRAINS.find(t=>t.id===id);
 const getEff = t => statusCache.get(t.id) || effectiveStatus(t);
 
-function resolvePhoto(sport, p){
+function resolvePhoto(folder, p){
   if(!p) return '';
   p = String(p).trim();
   if(/^(https?:)?\/\//.test(p) || p.includes('/')) return p;
-  return sport + '/images/' + p;
+  return folder + '/images/' + p;
 }
 const cleanText = v => (/^(na|n\/a|nan|null|-)$/i.test(String(v||'').trim()) ? '' : String(v||'').trim());
 const FORMAT_RANK = f => parseInt(f,10) || 0;
 
+const fixUrl = u => { u = String(u||'').trim(); return u && !/^[a-z][a-z0-9+.-]*:/i.test(u) && /^[\w-]+(\.[\w-]+)+/.test(u) ? 'https://'+u : u; };
+const PRIX_ORDER = ['Gratuit','Payant','Abonnement/passe'];
+
+function buildSoccer(r, sport, folder){
+  const t = {
+    id:r.id, name:r.name||r.id, addr:cleanText(r.addr), lat:parseFloat(r.lat), lng:parseFloat(r.lng), sport,
+    format:cleanText(r.format), capacity:Number(r.capacity)||0,
+    surface:cleanText(r.surface), lieu:cleanText(r.interieur_exterieur), access:cleanText(r.access),
+    reserveUrl:safeUrl(r.reserveUrl), montrealUrl:safeUrl(r.montrealUrl), calendarUrl:safeUrl(r.calendar_url),
+    photoUrl:resolvePhoto(folder, r.photo_url),
+    slots:parseSlots(r.reserved_slots), notes:cleanText(r.notes),
+  };
+  t.hasCoords = isFinite(t.lat) && isFinite(t.lng);
+  t.hasHours = t.slots.some(isOpeningSlot);
+  // Modes d'accès (un terrain peut en avoir plusieurs), dérivés des colonnes :
+  //  - access = « Accès libre »        → Accès libre ; + Réservation gratuite si reserveUrl ou calendar_url
+  //  - access = « Réservation payante » → Réservation payante ; + Accès libre si créneaux de jeu libre publiés
+  const a = norm(t.access), tags = [];
+  const freeSlots = t.slots.some(s=>s.status==='libre' && !isOpeningSlot(s));
+  if(/payante/.test(a)) tags.push('Réservation payante');
+  if(/libre/.test(a) || freeSlots) tags.push('Accès libre');
+  if(/libre/.test(a) && (t.reserveUrl || t.calendarUrl)) tags.push('Réservation gratuite');
+  t.accessTags = ACCESS_ORDER.filter(x=>tags.includes(x));
+  t.formatTags = t.format.split(',').map(s=>s.trim()).filter(Boolean);
+  t.lieuTags = t.lieu ? [t.lieu] : [];
+  t.detailTags = [...t.formatTags, ...(t.surface?[t.surface]:[]), ...t.accessTags];
+  return t;
+}
+
+function buildPool(r, sport, folder){
+  const yes = v => /^oui/i.test(String(v||'').trim());
+  const inn = yes(r.interieur), out = yes(r.exterieur);
+  const t = {
+    id:r.id, name:r.name||r.id, addr:cleanText(r.addr), lat:parseFloat(r.lat), lng:parseFloat(r.lng), sport,
+    ville:cleanText(r.ville), prix:cleanText(r.prix),
+    reserveUrl:safeUrl(fixUrl(r.reserveUrl)), montrealUrl:safeUrl(fixUrl(r.sourceUrl)), calendarUrl:'',
+    photoUrl:resolvePhoto(folder, r.photo_url),
+    slots:parseSlots(r.slots), notes:cleanText(r.notes),
+    mustReserve:yes(r.reservation_obligatoire),
+  };
+  t.hasCoords = isFinite(t.lat) && isFinite(t.lng);
+  t.outdoorOnly = out && !inn;
+  t.season = parseSeason(t.notes);
+  t.lieuTags = [inn?'Intérieur':'', out?'Extérieur':''].filter(Boolean);
+  t.lieu = t.lieuTags.join(' / ');
+  t.accessTags = []; t.formatTags = []; t.surface = '';
+  const pat = String(r.pataugeoire||'').trim();
+  t.equipTags = [];
+  if(/^oui$/i.test(pat) || /^\d+$/.test(pat)) t.equipTags.push('Pataugeoire');
+  if(t.slots.some(s=>s.status==='occupe')) t.equipTags.push('Longueurs');
+  if(t.mustReserve) t.equipTags.push('Réservation obligatoire');
+  const L = parseFloat(r.longueur_m), C = parseInt(r.couloirs,10);
+  t.detailTags = [
+    ...(t.prix ? [t.prix.replace('/',' / ')] : []),
+    ...(L ? [`${L} m`] : []), ...(C ? [`${C} couloir${C>1?'s':''}`] : []),
+    ...(t.equipTags.includes('Pataugeoire') ? ['Pataugeoire'] : []),
+    ...(t.mustReserve ? ['Réservation obligatoire'] : []),
+  ];
+  return t;
+}
+const BUILDERS = {soccer:buildSoccer, piscine:buildPool};
+
 async function loadTerrains(){
   const err = $('loadError');
-  try{
-    const out = [];
-    for(const s of SPORTS.filter(x=>x.enabled)){
-      const res = await fetch(`${s.id}/terrains.csv?t=${Date.now()}`);
-      if(!res.ok) throw new Error(`${s.id}/terrains.csv introuvable (${res.status})`);
-      parseCSV(await res.text()).forEach(r=>{ r.__sport=s.id; out.push(r); });
+  const out = [], failed = [];
+  for(const s of SPORTS.filter(x=>x.enabled)){
+    const path = `${s.folder}/${s.file}`;
+    try{
+      const res = await fetch(`${path}?t=${Date.now()}`);
+      if(!res.ok) throw new Error(`${path} introuvable (${res.status})`);
+      const rows = parseCSV(await res.text()).filter(r=>r.id);
+      rows.forEach(r=>out.push(BUILDERS[s.id](r, r.sport||s.id, s.folder)));
+    }catch(e){
+      console.error('Échec du chargement de '+path, e);
+      failed.push(path);
+      // on garde les données déjà chargées pour ce sport
+      TERRAINS.filter(t=>t.sport===s.id).forEach(t=>out.push(t));
     }
-    TERRAINS = out.filter(r=>r.id).map(r=>{
-      const sport = r.sport || r.__sport;
-      const t = {
-        id:r.id, name:r.name||r.id, addr:cleanText(r.addr), lat:parseFloat(r.lat), lng:parseFloat(r.lng), sport,
-        format:cleanText(r.format), capacity:Number(r.capacity)||0,
-        surface:cleanText(r.surface), lieu:cleanText(r.interieur_exterieur), access:cleanText(r.access),
-        reserveUrl:safeUrl(r.reserveUrl), montrealUrl:safeUrl(r.montrealUrl), calendarUrl:safeUrl(r.calendar_url),
-        photoUrl:resolvePhoto(sport, r.photo_url),
-        slots:parseSlots(r.reserved_slots), notes:cleanText(r.notes),
-      };
-      t.hasCoords = isFinite(t.lat) && isFinite(t.lng);
-      t.hasHours = t.slots.some(isOpeningSlot);
-      // Modes d'accès (un terrain peut en avoir plusieurs), dérivés des colonnes :
-      //  - access = « Accès libre »        → Accès libre ; + Réservation gratuite si reserveUrl ou calendar_url
-      //  - access = « Réservation payante » → Réservation payante ; + Accès libre si créneaux de jeu libre publiés
-      const a = norm(t.access), tags = [];
-      const freeSlots = t.slots.some(s=>s.status==='libre' && !isOpeningSlot(s));
-      if(/payante/.test(a)) tags.push('Réservation payante');
-      if(/libre/.test(a) || freeSlots) tags.push('Accès libre');
-      if(/libre/.test(a) && (t.reserveUrl || t.calendarUrl)) tags.push('Réservation gratuite');
-      t.accessTags = ACCESS_ORDER.filter(x=>tags.includes(x));
-      t.formatTags = t.format.split(',').map(s=>s.trim()).filter(Boolean);
-      return t;
-    });
-    err.style.display = 'none';
-    return true;
-  }catch(e){
-    console.error('Échec du chargement des terrains :', e);
-    if(!TERRAINS.length){
-      err.style.display = 'block';
-      err.textContent = "Le fichier des terrains n'a pas pu être chargé — vérifie qu'il est dans soccer/terrains.csv (à côté de index.html).";
-    }
+  }
+  if(failed.length===SPORTS.filter(x=>x.enabled).length && !TERRAINS.length){
+    err.style.display = 'block';
+    err.textContent = `Fichier introuvable : ${failed.join(', ')} — vérifie qu'il est à côté de index.html.`;
     return false;
   }
+  TERRAINS = out;
+  if(failed.length){ err.style.display='block'; err.textContent = `Fichier introuvable : ${failed.join(', ')}`; }
+  else err.style.display = 'none';
+  return !failed.length;
 }
 
 /* =====================================================================
@@ -544,7 +641,7 @@ let lastTab = 'map';
 let userPos = null;
 let listScroll = 0;
 let lastSig = '', lastDetailSig = '';
-const activeFilters = {status:new Set(), lieu:new Set(), format:new Set(), surface:new Set(), access:new Set()};
+const activeFilters = {status:new Set(), lieu:new Set(), format:new Set(), surface:new Set(), access:new Set(), prix:new Set(), equip:new Set()};
 
 function setView(v){
   view = v;
@@ -559,20 +656,23 @@ function setView(v){
    FILTRES — Statut (en direct), Lieu (intérieur/extérieur), Format, Surface, Accès
    OU à l'intérieur d'une catégorie, ET entre catégories.
    ===================================================================== */
-const FILTERS = [
-  {key:'status',  label:'Statut',  get:t=>[getEff(t).status], values:()=>STATUS_ORDER, fmt:v=>STATUS[v].short},
-  {key:'lieu',    label:'Lieu',    get:t=>t.lieu?[t.lieu]:[],       values:()=>distinct(t=>t.lieu?[t.lieu]:[])},
-  {key:'format',  label:'Format',  get:t=>t.formatTags,             values:()=>distinct(t=>t.formatTags).sort((a,b)=>FORMAT_RANK(b)-FORMAT_RANK(a))},
-  {key:'surface', label:'Surface', get:t=>t.surface?[t.surface]:[], values:()=>distinct(t=>t.surface?[t.surface]:[])},
-  {key:'access',  label:'Accès',   get:t=>t.accessTags,   values:()=>ACCESS_ORDER},
-];
+const FILTER_DEFS = {
+  status: {label:'Statut',  get:t=>[getEff(t).status], values:()=>STATUS_ORDER, fmt:v=>stText(v)},
+  lieu:   {label:'Lieu',    get:t=>t.lieuTags,         values:()=>distinct(t=>t.lieuTags)},
+  format: {label:'Format',  get:t=>t.formatTags,       values:()=>distinct(t=>t.formatTags).sort((a,b)=>FORMAT_RANK(b)-FORMAT_RANK(a))},
+  surface:{label:'Surface', get:t=>t.surface?[t.surface]:[], values:()=>distinct(t=>t.surface?[t.surface]:[])},
+  access: {label:'Accès',   get:t=>t.accessTags,       values:()=>ACCESS_ORDER},
+  prix:   {label:'Prix',    get:t=>t.prix?[t.prix]:[], values:()=>PRIX_ORDER.filter(p=>distinct(t=>t.prix?[t.prix]:[]).includes(p)), fmt:v=>v.replace('/',' / ')},
+  equip:  {label:'Équipements', get:t=>t.equipTags||[], values:()=>distinct(t=>t.equipTags||[])},
+};
+const filtersFor = () => (SPORT().filters||[]).map(k=>({key:k, ...FILTER_DEFS[k]}));
 function distinct(getter){
   const s = new Set();
   TERRAINS.filter(t=>t.sport===activeSport).forEach(t=>getter(t).forEach(v=>s.add(v)));
   return [...s].sort((a,b)=>a.localeCompare(b,'fr'));
 }
 function matchesFilters(t){
-  return FILTERS.every(f=>{
+  return filtersFor().every(f=>{
     const sel = activeFilters[f.key];
     return !sel.size || f.get(t).some(v=>sel.has(v));
   });
@@ -580,7 +680,7 @@ function matchesFilters(t){
 const activeFilterCount = () => Object.values(activeFilters).reduce((n,s)=>n+s.size,0);
 
 function renderFilterBody(){
-  $('filterBody').innerHTML = FILTERS.map(f=>{
+  $('filterBody').innerHTML = filtersFor().map(f=>{
     const vals = f.values();
     if(!vals.length) return '';
     return `<div class="filter-group"><h3>${f.label}</h3><div class="filter-chips">${
@@ -604,7 +704,7 @@ function updateFilterUI(list){
   const n = activeFilterCount();
   const b = $('filterBadge'); b.textContent = n; b.hidden = !n;
   list = list || currentList();
-  $('filterApply').textContent = `Voir ${list.length} terrain${list.length>1?'s':''}`;
+  $('filterApply').textContent = `Voir ${NOUN(list.length)}`;
 }
 function clearFilters(){
   Object.values(activeFilters).forEach(s=>s.clear());
@@ -631,7 +731,7 @@ function renderSidebarList(){
   const sport = SPORTS.find(s=>s.id===activeSport);
   $('sidebar').innerHTML = `
     <div class="list-head">
-      <h2>Terrains — ${esc(sport.label)}</h2>
+      <h2>${esc(sport.noun.title)} — ${esc(sport.label)}</h2>
       <p id="listMeta"></p>
     </div>
     <div class="list-body" id="listBody"></div>`;
@@ -642,9 +742,9 @@ function renderListBody(list){
   const body = $('listBody');
   if(!body) return;
   const n = activeFilterCount();
-  $('listMeta').innerHTML = `${list.length} terrain${list.length>1?'s':''}${n?` · ${n} filtre${n>1?'s':''} actif${n>1?'s':''} <button class="link-btn" data-act="clear-filters">Réinitialiser</button>`:''}`;
+  $('listMeta').innerHTML = `${NOUN(list.length)}${n?` · ${n} filtre${n>1?'s':''} actif${n>1?'s':''} <button class="link-btn" data-act="clear-filters">Réinitialiser</button>`:''}`;
   if(!list.length){
-    body.innerHTML = `<div class="empty-state">Aucun terrain ne correspond à ces filtres.${n?'<button class="btn" data-act="clear-filters">Réinitialiser les filtres</button>':''}</div>`;
+    body.innerHTML = `<div class="empty-state">${esc(SPORT().noun.none)} ne correspond à ces filtres.${n?'<button class="btn" data-act="clear-filters">Réinitialiser les filtres</button>':''}</div>`;
     return;
   }
   const top = body.scrollTop;
@@ -654,7 +754,7 @@ function renderListBody(list){
     return `<div class="card" role="button" tabindex="0" data-id="${esc(t.id)}">
       <div class="card-top">
         <div class="card-name">${esc(t.name)}</div>
-        <div class="status-pill s-${e.status}"><span class="status-dot"></span>${esc(STATUS[e.status].short)}</div>
+        <div class="status-pill s-${e.status}"><span class="status-dot"></span>${esc(stText(e.status))}</div>
       </div>
       <div class="card-meta"><span>${esc(t.addr)}</span>${d!=null?`<span>${fmtDist(d)}</span>`:''}</div>
     </div>`;
@@ -671,7 +771,7 @@ function renderTimeline(t){
     const live = now.min>=s.start && now.min<s.end;
     return `<div class="timeline-row s-${s.status} ${live?'now':''}">
       <span class="status-dot"></span>
-      <span class="hrs">${allDay?'Toute la journée':`${fmtMin(s.start)}–${fmtMin(s.end)}`}</span>${esc(s.label||STATUS[s.status].short)}
+      <span class="hrs">${allDay?'Toute la journée':`${fmtMin(s.start)}–${fmtMin(s.end)}`}</span>${esc(s.label||stText(s.status))}
     </div>`;
   };
   const body = !rows.length ? `<div class="timeline-empty">Aucun créneau publié aujourd'hui.</div>`
@@ -697,7 +797,7 @@ function renderReservation(t){
     parts.push(`<a class="reserve-link" href="${esc(t.reserveUrl)}" target="_blank" rel="noopener">Réserver / infos ↗</a>`);
   }
   const official = t.montrealUrl && t.montrealUrl!==t.calendarUrl && t.montrealUrl!==t.reserveUrl
-    ? `<a class="more-link" href="${esc(t.montrealUrl)}" target="_blank" rel="noopener">Fiche officielle ↗</a>` : '';
+    ? `<a class="more-link" href="${esc(t.montrealUrl)}" target="_blank" rel="noopener">${t.sport==='piscine'&&!/montreal\.ca/.test(t.montrealUrl)?'Site officiel':'Fiche officielle'} ↗</a>` : '';
   if(!parts.length && !official) return '';
   return `<div class="section">${parts.length?`<h3>Réserver</h3>${parts.join('')}`:''}${official?`<div>${official}</div>`:''}</div>`;
 }
@@ -718,10 +818,8 @@ function openDetail(id, opts={}){
   const e = getEff(t);
   lastDetailSig = e.status+'|'+e.note;
   const tags = [];
-  if(t.lieu) tags.push(`<span class="tag lieu">${esc(t.lieu)}</span>`);
-  t.formatTags.forEach(f=>tags.push(`<span class="tag">${esc(f)}</span>`));
-  if(t.surface) tags.push(`<span class="tag">${esc(t.surface)}</span>`);
-  t.accessTags.forEach(a=>tags.push(`<span class="tag">${esc(a)}</span>`));
+  t.lieuTags.forEach(l=>tags.push(`<span class="tag lieu">${esc(l)}</span>`));
+  t.detailTags.forEach(x=>tags.push(`<span class="tag">${esc(x)}</span>`));
 
   const prev = $('sidebar').querySelector('.detail');
   const top = prev ? prev.scrollTop : 0;
@@ -732,7 +830,7 @@ function openDetail(id, opts={}){
       <div class="detail-name">${esc(t.name)}</div>
       <div class="detail-status s-${e.status}">
         <span class="status-dot"></span>
-        <div>${esc(STATUS[e.status].label)}${e.note?`<small>${esc(e.note)}</small>`:''}</div>
+        <div>${esc(stText(e.status))}${e.note?`<small>${esc(e.note)}</small>`:''}</div>
       </div>
       ${tags.length?`<div class="tag-row">${tags.join('')}</div>`:''}
       ${renderTimeline(t)}
@@ -766,7 +864,7 @@ function renderLegend(list){
   const c = {}; STATUS_ORDER.forEach(k=>c[k]=0);
   list.forEach(t=>c[getEff(t).status]++);
   $('scoreboard').innerHTML = STATUS_ORDER.map(k=>
-    `<div class="sb-item s-${k}"><span class="sb-dot"></span>${esc(STATUS[k].short)} <b>${c[k]}</b></div>`).join('');
+    `<div class="sb-item s-${k}"><span class="sb-dot"></span>${esc(stText(k))} <b>${c[k]}</b></div>`).join('');
 }
 
 /* =====================================================================
@@ -941,7 +1039,7 @@ function refresh(opts={}){
   const now = montrealNow();
   statusCache = new Map(TERRAINS.map(t=>[t.id, effectiveStatus(t, now)]));
   const list = currentList();
-  $('counter').textContent = `${list.length} terrain${list.length>1?'s':''}`;
+  $('counter').textContent = NOUN(list.length);
   $('clock').textContent = new Date().toLocaleTimeString('fr-CA',{timeZone:MTL_TZ,hour:'2-digit',minute:'2-digit'});
   renderLegend(list);
   updateFilterUI(list);
