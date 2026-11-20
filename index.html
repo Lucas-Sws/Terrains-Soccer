@@ -559,8 +559,15 @@ const FORMAT_RANK = f => parseInt(f,10) || 0;
 
 const fixUrl = u => { u = String(u||'').trim(); return u && !/^[a-z][a-z0-9+.-]*:/i.test(u) && /^[\w-]+(\.[\w-]+)+/.test(u) ? 'https://'+u : u; };
 const PRIX_ORDER = ['Gratuit','Payant','Abonnement/passe','Réservation obligatoire'];
-const LEN_BUCKETS = ['Moins de 25 m','25 m','26 à 49 m','50 m et plus'];
-const lenBucket = L => !L ? null : L<25 ? LEN_BUCKETS[0] : L===25 ? LEN_BUCKETS[1] : L<50 ? LEN_BUCKETS[2] : LEN_BUCKETS[3];
+const LEN_BUCKETS = ['25 m','50 m','25 verges','Non renseigné / autres'];
+// Colonne longueur_m : « 25 », « 50 », « 25 verges » ; vide ou autre valeur → Non renseigné / autres
+function lenBucket(raw){
+  const s = norm(raw).replace(',', '.');
+  if(/verge|yard|yd/.test(s) && /^25/.test(s)) return LEN_BUCKETS[2];
+  if(/^25(\.0+)?(\s*m)?$/.test(s)) return LEN_BUCKETS[0];
+  if(/^50(\.0+)?(\s*m)?$/.test(s)) return LEN_BUCKETS[1];
+  return LEN_BUCKETS[3];
+}
 
 function buildSoccer(r, sport, folder){
   const t = {
@@ -607,11 +614,12 @@ function buildPool(r, sport, folder){
   t.accessTags = []; t.formatTags = []; t.surface = '';
   const pat = String(r.pataugeoire||'').trim();
   const hasPat = /^oui$/i.test(pat) || /^\d+$/.test(pat);
-  const L = parseFloat(r.longueur_m), C = parseInt(r.couloirs,10);
-  t.lenTags = lenBucket(L) ? [lenBucket(L)] : [];
+  const C = parseInt(r.couloirs,10);
+  const lenRaw = cleanText(r.longueur_m);
+  t.lenTags = [lenBucket(lenRaw)];
   t.detailTags = [
     ...(t.prix ? [t.prix.replace('/',' / ')] : []),
-    ...(L ? [`${L} m`] : []), ...(C ? [`${C} couloir${C>1?'s':''}`] : []),
+    ...(lenRaw ? [/^[\d.,]+$/.test(lenRaw) ? `${lenRaw} m` : lenRaw] : []), ...(C ? [`${C} couloir${C>1?'s':''}`] : []),
     ...(hasPat ? ['Pataugeoire'] : []),
     ...(t.mustReserve ? ['Réservation obligatoire'] : []),
   ];
