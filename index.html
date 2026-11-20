@@ -16,9 +16,11 @@
     --on-accent:#F1F3EC; --on-accent-dim:#9FB0A2;
     --floodlight:#2E7D4F;
     --libre:#2F9E5C;
-    --occupe:#D9483A; --ferme:#6B7280;
+    --occupe:#D9483A; --ferme:#6B7280; --adultes:#7B5CC4; --enfants:#DE8A25;
     --radius:10px; --shadow:0 8px 22px rgba(15,30,20,.14);
   }
+  /* Thème piscines : bandeau et accents bleus */
+  body[data-sport="piscine"]{--accent-dark:#0F2D4F; --accent-dark-2:#1A4672; --floodlight:#1F6FB5;}
   *{box-sizing:border-box;}
   [hidden]{display:none !important;}
   html,body{margin:0;padding:0;height:100%;background:var(--bg);color:var(--ink);font-family:'IBM Plex Sans',sans-serif;overflow:hidden;-webkit-text-size-adjust:100%;}
@@ -29,7 +31,7 @@
   .app{display:flex;flex-direction:column;height:100vh;height:100dvh;}
 
   /* ---------- Statuts (une seule définition de couleur par statut) ---------- */
-  .s-libre{--c:var(--libre);}
+  .s-libre{--c:var(--libre);} .s-adultes{--c:var(--adultes);} .s-enfants{--c:var(--enfants);}
   .s-occupe{--c:var(--occupe);} .s-ferme{--c:var(--ferme);}
   .status-dot,.sb-dot{width:8px;height:8px;border-radius:50%;background:var(--c);flex-shrink:0;display:inline-block;}
 
@@ -311,18 +313,22 @@ const SPORTS = [
    filters:['status','lieu','format','surface','access']},
   {id:'piscine',   label:'Piscines',   enabled:true, folder:'piscine', file:'piscines.csv',
    noun:{sg:'piscine', pl:'piscines', none:'Aucune piscine', title:'Piscines'},
-   statusLabels:{libre:'Ouvert', occupe:'Occupé', ferme:'Fermé'},
-   filters:['status','lieu','prix','equip']},
+   statusLabels:{libre:'Bain libre', adultes:'Adultes', enfants:'Enfants', ferme:'Fermé'},
+   statusOrder:['libre','enfants','adultes','ferme'],
+   filters:['status','lieu','prix','longueur']},
   {id:'tennis',    label:'Tennis',     enabled:false, folder:'tennis',    file:'terrains.csv'},
   {id:'patinoire', label:'Patinoires', enabled:false, folder:'patinoire', file:'patinoires.csv'},
 ];
 const SPORT = id => SPORTS.find(s=>s.id===(id||activeSport)) || SPORTS[0];
+const STATUS_LIST = () => SPORT().statusOrder || STATUS_ORDER;
 const NOUN  = n => `${n} ${n>1?SPORT().noun.pl:SPORT().noun.sg}`;
 // Libellés de statut propres à chaque sport (piscines : Ouvert / Occupé / Fermé)
 const stText = k => ((SPORT().statusLabels)||{})[k] || STATUS[k].short;
 
 const STATUS = {
   libre:     {label:'Libre',   short:'Libre',  color:'#2F9E5C', sort:2},
+  adultes:   {label:'Adultes', short:'Adultes',color:'#7B5CC4', sort:2},
+  enfants:   {label:'Enfants', short:'Enfants',color:'#DE8A25', sort:2},
   occupe:    {label:'Occupé',  short:'Occupé', color:'#D9483A', sort:1},
   ferme:     {label:'Fermé',   short:'Fermé',  color:'#6B7280', sort:0},
 };
@@ -399,9 +405,18 @@ function parseDays(field){
   return set;
 }
 function toMin(s){ const m=/^(\d{1,2}):(\d{2})$/.exec(String(s||'').trim()); return m ? (+m[1])*60+(+m[2]) : null; }
-const SLOT_STATUS = {libre:'libre', occupe:'occupe', signale:'occupe', ferme:'ferme',
-  'bain libre':'libre', 'longueurs':'occupe'};   // piscines : bain libre = ouvert ; longueurs seulement = occupé   // « signale » (ancien) = occupé
+const SLOT_STATUS = {libre:'libre', occupe:'occupe', signale:'occupe', ferme:'ferme'};   // « signale » (ancien) = occupé
 
+// Piscines : public du créneau → catégorie. tous → Bain libre ; adultes/aînés/longueurs → Adultes ; enfants/familles → Enfants
+function poolSlotStatus(p){
+  const type = norm(p[5]);
+  if(type==='longueurs') return 'adultes';
+  if(type!=='bain libre') return null;
+  const who = norm(p.slice(6).join(','));
+  if(/enfant|famille/.test(who)) return 'enfants';
+  if(/adulte|aine/.test(who)) return 'adultes';
+  return 'libre';
+}
 const POOL_TYPE = {'bain libre':'Bain libre', 'longueurs':'Longueurs seulement'};
 function slotLabel(p){
   const type = POOL_TYPE[norm(p[5])], rest = p.slice(6).join(',').trim();
@@ -416,7 +431,7 @@ function parseSlots(raw){
     const days = parseDays(p[0]);
     const start = toMin(p[1]);
     let end = toMin(p[2]);
-    const status = SLOT_STATUS[norm(p[5])];
+    const status = poolSlotStatus(p) || SLOT_STATUS[norm(p[5])];
     if(!days.size || start==null || end==null || !status) return null;
     if(end===1439) end = 1440;                       // 23:59 = fin de journée
     const iso = /^\d{4}-\d{2}-\d{2}$/;
@@ -475,9 +490,10 @@ function isWinter(now){ const p = now.date.split('-'); const md = (+p[1])*100 + 
 
 /* ---- PISCINES : Ouvert / Occupé / Fermé
    1. Piscine extérieure hors saison (dates du champ notes, sinon 15 juin → 7 sept.) → Fermé
-   2. Créneau actif : « bain libre » → Ouvert ; « longueurs seulement » → Occupé ; fermé → Fermé
+   2. Créneau(x) actif(s) : Bain libre (tous publics) | Enfants (enfants, familles) | Adultes (adultes, aînés, longueurs)
+      Plusieurs catégories peuvent être actives en même temps (e.kinds) ; la couleur suit la première.
    3. Des horaires sont publiés mais aucun n'est actif → Fermé (avec prochaine ouverture du jour)
-   4. Aucun horaire publié → Ouvert (à confirmer)                                          */
+   4. Aucun horaire publié → Bain libre (à confirmer)                                      */
 const POOL_SEASON_DEFAULT = {from:615, to:907};
 const MONTHS = {janvier:1,fevrier:2,mars:3,avril:4,mai:5,juin:6,juillet:7,aout:8,septembre:9,octobre:10,novembre:11,decembre:12};
 function parseSeason(notes){
@@ -496,10 +512,10 @@ function poolStatus(t, now){
   const active = today.filter(s=>s.start<=now.min && now.min<s.end);
   const until = s => s.end<1440 ? ` jusqu'à ${fmtMin(s.end)}` : '';
   if(active.length){
-    const open = active.find(s=>s.status==='libre');
-    if(open) return {status:'libre', note:`${open.label}${until(open)}`};
-    const s = active[0];
-    return {status:'occupe', note:`${s.label}${until(s)} — bain libre non offert`};
+    const kinds = ['libre','enfants','adultes'].filter(k=>active.some(s=>s.status===k));
+    const main = active.find(s=>s.status===kinds[0]);
+    const more = kinds.length>1 ? ' · aussi '+kinds.slice(1).map(k=>stText(k).toLowerCase()).join(', ') : '';
+    return {status:kinds[0], kinds, note:`${main.label}${until(main)}${more}`};
   }
   if(t.slots.length){
     const next = today.filter(s=>s.start>now.min && s.status==='libre')[0];
@@ -542,7 +558,9 @@ const cleanText = v => (/^(na|n\/a|nan|null|-)$/i.test(String(v||'').trim()) ? '
 const FORMAT_RANK = f => parseInt(f,10) || 0;
 
 const fixUrl = u => { u = String(u||'').trim(); return u && !/^[a-z][a-z0-9+.-]*:/i.test(u) && /^[\w-]+(\.[\w-]+)+/.test(u) ? 'https://'+u : u; };
-const PRIX_ORDER = ['Gratuit','Payant','Abonnement/passe'];
+const PRIX_ORDER = ['Gratuit','Payant','Abonnement/passe','Réservation obligatoire'];
+const LEN_BUCKETS = ['Moins de 25 m','25 m','26 à 49 m','50 m et plus'];
+const lenBucket = L => !L ? null : L<25 ? LEN_BUCKETS[0] : L===25 ? LEN_BUCKETS[1] : L<50 ? LEN_BUCKETS[2] : LEN_BUCKETS[3];
 
 function buildSoccer(r, sport, folder){
   const t = {
@@ -588,15 +606,13 @@ function buildPool(r, sport, folder){
   t.lieu = t.lieuTags.join(' / ');
   t.accessTags = []; t.formatTags = []; t.surface = '';
   const pat = String(r.pataugeoire||'').trim();
-  t.equipTags = [];
-  if(/^oui$/i.test(pat) || /^\d+$/.test(pat)) t.equipTags.push('Pataugeoire');
-  if(t.slots.some(s=>s.status==='occupe')) t.equipTags.push('Longueurs');
-  if(t.mustReserve) t.equipTags.push('Réservation obligatoire');
+  const hasPat = /^oui$/i.test(pat) || /^\d+$/.test(pat);
   const L = parseFloat(r.longueur_m), C = parseInt(r.couloirs,10);
+  t.lenTags = lenBucket(L) ? [lenBucket(L)] : [];
   t.detailTags = [
     ...(t.prix ? [t.prix.replace('/',' / ')] : []),
     ...(L ? [`${L} m`] : []), ...(C ? [`${C} couloir${C>1?'s':''}`] : []),
-    ...(t.equipTags.includes('Pataugeoire') ? ['Pataugeoire'] : []),
+    ...(hasPat ? ['Pataugeoire'] : []),
     ...(t.mustReserve ? ['Réservation obligatoire'] : []),
   ];
   return t;
@@ -641,7 +657,7 @@ let lastTab = 'map';
 let userPos = null;
 let listScroll = 0;
 let lastSig = '', lastDetailSig = '';
-const activeFilters = {status:new Set(), lieu:new Set(), format:new Set(), surface:new Set(), access:new Set(), prix:new Set(), equip:new Set()};
+const activeFilters = {status:new Set(), lieu:new Set(), format:new Set(), surface:new Set(), access:new Set(), prix:new Set(), longueur:new Set()};
 
 function setView(v){
   view = v;
@@ -657,13 +673,14 @@ function setView(v){
    OU à l'intérieur d'une catégorie, ET entre catégories.
    ===================================================================== */
 const FILTER_DEFS = {
-  status: {label:'Statut',  get:t=>[getEff(t).status], values:()=>STATUS_ORDER, fmt:v=>stText(v)},
+  status: {label:'Statut',  get:t=>{ const e=getEff(t); return e.kinds||[e.status]; }, values:()=>STATUS_LIST(), fmt:v=>stText(v)},
   lieu:   {label:'Lieu',    get:t=>t.lieuTags,         values:()=>distinct(t=>t.lieuTags)},
   format: {label:'Format',  get:t=>t.formatTags,       values:()=>distinct(t=>t.formatTags).sort((a,b)=>FORMAT_RANK(b)-FORMAT_RANK(a))},
   surface:{label:'Surface', get:t=>t.surface?[t.surface]:[], values:()=>distinct(t=>t.surface?[t.surface]:[])},
   access: {label:'Accès',   get:t=>t.accessTags,       values:()=>ACCESS_ORDER},
-  prix:   {label:'Prix',    get:t=>t.prix?[t.prix]:[], values:()=>PRIX_ORDER.filter(p=>distinct(t=>t.prix?[t.prix]:[]).includes(p)), fmt:v=>v.replace('/',' / ')},
-  equip:  {label:'Équipements', get:t=>t.equipTags||[], values:()=>distinct(t=>t.equipTags||[])},
+  prix:   {label:'Prix',    get:t=>[...(t.prix?[t.prix]:[]), ...(t.mustReserve?['Réservation obligatoire']:[])],
+           values:()=>PRIX_ORDER, fmt:v=>v.replace('/',' / ')},
+  longueur:{label:'Longueur du bassin', get:t=>t.lenTags||[], values:()=>LEN_BUCKETS},
 };
 const filtersFor = () => (SPORT().filters||[]).map(k=>({key:k, ...FILTER_DEFS[k]}));
 function distinct(getter){
@@ -861,9 +878,9 @@ function selectTerrain(id, fromMap){
    LÉGENDE
    ===================================================================== */
 function renderLegend(list){
-  const c = {}; STATUS_ORDER.forEach(k=>c[k]=0);
+  const c = {}; STATUS_LIST().forEach(k=>c[k]=0);
   list.forEach(t=>c[getEff(t).status]++);
-  $('scoreboard').innerHTML = STATUS_ORDER.map(k=>
+  $('scoreboard').innerHTML = STATUS_LIST().map(k=>
     `<div class="sb-item s-${k}"><span class="sb-dot"></span>${esc(stText(k))} <b>${c[k]}</b></div>`).join('');
 }
 
@@ -971,7 +988,7 @@ async function initMap(){
 }
 
 function onMapLoad(){
-  STATUS_ORDER.forEach(k=>{
+  Object.keys(STATUS).forEach(k=>{
     map.addImage('pin-'+k, makePinImage(STATUS[k].color), {pixelRatio:2});
   });
   map.addSource('terrains', {type:'geojson', data:pendingFC||{type:'FeatureCollection',features:[]}, cluster:true, clusterRadius:46, clusterMaxZoom:14});
@@ -1007,6 +1024,7 @@ function onMapLoad(){
   });
 
   mapReady = true;
+  applyTheme();
   applySelection();
   if(pendingFit) fitToList(pendingFit);
 }
@@ -1072,6 +1090,11 @@ function requestGeolocation(){
 /* =====================================================================
    INTERFACE : sports, clics (délégation d'événements), clavier
    ===================================================================== */
+function applyTheme(){
+  document.body.dataset.sport = activeSport;
+  const c = getComputedStyle(document.body).getPropertyValue('--accent-dark').trim() || '#122A1C';
+  if(typeof mapReady!=='undefined' && mapReady){ try{ map.setPaintProperty('clusters','circle-color',c); }catch(e){} }
+}
 function renderSportUI(){
   $('sportChips').innerHTML = SPORTS.map(s=>
     `<div class="chip ${s.id===activeSport?'active':''} ${!s.enabled?'disabled':''}" ${s.enabled?`data-act="sport" data-sport="${s.id}"`:''}>${esc(s.label)}${!s.enabled?' · bientôt':''}</div>`).join('');
@@ -1080,6 +1103,7 @@ function renderSportUI(){
 }
 function setSport(id){
   activeSport = id;
+  applyTheme();
   Object.values(activeFilters).forEach(s=>s.clear());
   renderSportUI();
   showList();
@@ -1128,6 +1152,7 @@ $('mobileSportSelect').addEventListener('change', e=>setSport(e.target.value));
    DÉMARRAGE
    ===================================================================== */
 (async function start(){
+  applyTheme();
   renderSportUI();
   renderSidebarList();
   setView('map');
